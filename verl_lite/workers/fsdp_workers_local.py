@@ -570,6 +570,17 @@ class LocalFSDPWorkers:
         """Get a worker by role."""
         return self.workers.get(role)
     
+    def get_model(self, role: str):
+        """Get the model from a specific worker role."""
+        worker = self.workers.get(role)
+        if worker is None:
+            raise ValueError(f"Worker role '{role}' not found")
+        
+        if hasattr(worker, 'model'):
+            return worker.model
+        else:
+            raise AttributeError(f"Worker '{role}' does not have a 'model' attribute")
+    
     def generate_sequences(self, prompts: DataProto) -> DataProto:
         """Generate sequences using the actor worker."""
         return self.workers['actor'].generate_sequences(prompts)
@@ -624,6 +635,9 @@ class LocalFSDPWorkers:
         """Clean up resources."""
         logger.info("Cleaning up local FSDP workers")
         # FSDP cleanup if needed
+        for worker in self.workers.values():
+            if hasattr(worker, 'cleanup'):
+                worker.cleanup()
 
 
 # Convenience functions for API compatibility

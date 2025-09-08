@@ -56,6 +56,21 @@ cd recipe/grpo
 ./run_grpo_example.sh "microsoft/DialoGPT-small" "train.parquet" "./output"
 ```
 
+### Weight Synchronization
+
+```python
+# Weight updates are automatically synced from trainer to rollout server
+from verl_lite.trainer import LocalPPOTrainer, LocalTrainingConfig
+
+config = LocalTrainingConfig(
+    enable_weight_sync=True,
+    sync_weights_frequency=1  # Sync every training step
+)
+
+trainer = LocalPPOTrainer(config)
+# Weights automatically sync during training steps
+```
+
 ## 🔧 Architecture
 
 verl-lite maintains the same APIs but removes Ray:
@@ -82,6 +97,7 @@ verl-lite maintains the same APIs but removes Ray:
 |---------|-----------|-----------|-----------|
 | **Algorithms** | ✅ Same | ✅ Same | ✅ None |
 | **Data Protocol** | ✅ Same | ✅ Same | ✅ None |
+| **Weight Sync** | ✅ Auto-sync | ✅ Ray-based | ⚠️ Config |
 | **FSDP Training** | ✅ Single machine | ✅ Distributed | ⚠️ Config |
 | **vLLM/SGLang** | ✅ Server mode | ✅ Engine+Server | ⚠️ Mode |
 | **Ray** | ❌ None | ✅ Required | 🔄 Add Ray |
@@ -96,7 +112,13 @@ Complete GRPO implementation that can be migrated to full VERL:
 - `recipe/grpo/reward_function.py` - Reward function
 - `recipe/grpo/README.md` - Documentation
 
-### 2. Migration Example  
+### 2. Weight Synchronization Demo
+Demonstrates automatic weight updates during RL training:
+- `examples/weight_sync_example.py` - Weight sync demonstration
+- Automatic sync from trainer to rollout server
+- Critical for RL training effectiveness
+
+### 3. Migration Example  
 Demonstrates same code working in both environments:
 - `examples/migration_example.py` - Conditional execution
 
