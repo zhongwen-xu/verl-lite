@@ -26,7 +26,7 @@ from typing import Dict, Any
 USE_RAY = os.getenv("USE_RAY", "False").lower() == "true"
 
 # Import core components (same for both)
-from verl import DataProto
+from verl_lite import TensorDict, tu
 from verl.trainer.config import AlgoConfig
 
 if USE_RAY:
@@ -217,7 +217,7 @@ def show_import_patterns():
     print("Pattern 2: Direct Import (for libraries)")
     print("```python")
     print("# These imports are always the same:")
-    print("from verl import DataProto")
+    print("from verl_lite import TensorDict, tu")
     print("from verl.trainer.config import AlgoConfig")
     print("from verl.utils.reward_score import math")
     print("```\n")

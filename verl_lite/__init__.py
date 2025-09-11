@@ -34,8 +34,10 @@ __version__ = "0.1.0"
 
 # Import core components directly from verl
 try:
-    # Core protocol - import as-is since it doesn't use Ray
-    from verl.protocol import DataProto
+    # Core TensorDict components - replacing DataProto
+    from tensordict import TensorDict
+    from tensordict.tensorclass import NonTensorData, NonTensorStack
+    from verl.utils import tensordict_utils as tu
     from verl import base_config
     
     # Import logging utilities (Ray-free)
@@ -46,7 +48,10 @@ try:
     from verl.utils import model, tokenizer, torch_functional, py_functional
     
     __all__ = [
-        "DataProto",
+        "TensorDict",
+        "NonTensorData", 
+        "NonTensorStack",
+        "tu",  # tensordict_utils
         "base_config",
         "tracking", 
         "aggregate_logger",

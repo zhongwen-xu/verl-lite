@@ -36,7 +36,7 @@ These components work identically in both versions:
 
 ```python
 # ✅ Same in both verl-lite and full VERL
-from verl import DataProto                    # Data protocol
+from verl_lite import TensorDict, tu          # Data protocol
 from verl.trainer.config import AlgoConfig   # Algorithm config
 from verl.utils.reward_score import math     # Reward utilities
 from verl.utils.tokenizer import HFTokenizer # Tokenizer
@@ -233,7 +233,7 @@ class TrainingConfig:
 | GRPO Training | ✅ | ✅ | ✅ None |
 | Reward Functions | ✅ | ✅ | ✅ None |
 | **Data & Protocol** | | | |
-| DataProto | ✅ | ✅ | ✅ None |
+| TensorDict | ✅ | ✅ | ✅ Native PyTorch |
 | Datasets | ✅ | ✅ | ✅ None |
 | **Models** | | | |
 | FSDP Training | ✅ | ✅ | ✅ Config only |

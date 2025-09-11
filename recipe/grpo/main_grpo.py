@@ -29,7 +29,7 @@ from typing import Any, Dict, List, Optional
 
 # Import verl components directly (maintaining same API)
 try:
-    from verl import DataProto
+    from verl_lite import TensorDict, tu
     from verl.trainer.config import AlgoConfig
     from verl.workers.config import FSDPActorConfig, RolloutConfig
     from verl.utils.config import omega_conf_to_dataclass
@@ -103,7 +103,7 @@ class SimpleGRPODataset:
         return len(self.data)
     
     def __getitem__(self, idx):
-        """Get a batch of prompts as DataProto."""
+        """Get a batch of prompts as TensorDict."""
         if isinstance(idx, slice):
             # Handle slicing
             start, stop, step = idx.indices(len(self.data))
@@ -115,7 +115,7 @@ class SimpleGRPODataset:
             # List of indices
             batch_data = [self.data[i] for i in idx]
         
-        # Convert to DataProto
+        # Convert to TensorDict
         prompts = [item['prompt'] for item in batch_data]
         ground_truths = [item['ground_truth'] for item in batch_data]
         
@@ -128,23 +128,19 @@ class SimpleGRPODataset:
             return_tensors="pt"
         )
         
-        from tensordict import TensorDict
-        import numpy as np
-        
-        batch_tensor = TensorDict({
+        tensor_dict = {
             "input_ids": tokenized["input_ids"],
             "attention_mask": tokenized["attention_mask"],
-        }, batch_size=(len(prompts),))
-        
-        non_tensor_batch = {
-            "prompts": np.array(prompts, dtype=object),
-            "ground_truths": np.array(ground_truths, dtype=object),
         }
         
-        return DataProto(
-            batch=batch_tensor,
-            non_tensor_batch=non_tensor_batch,
-            meta_info={"batch_size": len(prompts)}
+        non_tensor_dict = {
+            "prompts": prompts,
+            "ground_truths": ground_truths,
+        }
+        
+        return tu.get_tensordict(
+            tensor_dict=tensor_dict,
+            non_tensor_dict=non_tensor_dict
         )
     
     def get_dataloader(self, batch_size: int):
@@ -203,15 +199,15 @@ class GRPOTrainer(LocalPPOTrainer):
             )
             logger.info(f"Loaded reward function: {config.reward_function_name}")
     
-    def compute_rewards(self, data: DataProto) -> DataProto:
+    def compute_rewards(self, data: TensorDict) -> TensorDict:
         """Compute rewards using custom reward function."""
         if self.reward_function:
             # Use custom reward function
             rewards = []
             
-            prompts = data.non_tensor_batch.get("prompts", [])
-            responses = data.non_tensor_batch.get("response_text", [])
-            ground_truths = data.non_tensor_batch.get("ground_truths", [])
+            prompts = tu.get_non_tensor_data(data, "prompts", [])
+            responses = tu.get_non_tensor_data(data, "response_text", [])
+            ground_truths = tu.get_non_tensor_data(data, "ground_truths", [])
             
             for prompt, response, gt in zip(prompts, responses, ground_truths):
                 reward = self.reward_function(
@@ -225,14 +221,13 @@ class GRPOTrainer(LocalPPOTrainer):
             import numpy as np
             reward_array = np.array(rewards, dtype=np.float32)
             
-            # Create reward DataProto
-            reward_data = DataProto(
-                batch=data.batch.clone() if data.batch else None,
-                non_tensor_batch={
-                    **data.non_tensor_batch,
-                    "rewards": reward_array
-                },
-                meta_info=data.meta_info
+            # Create reward TensorDict - merge with original data
+            reward_data = tu.union_tensor_dict(
+                data, 
+                tu.get_tensordict(
+                    tensor_dict={},
+                    non_tensor_dict={"rewards": reward_array}
+                )
             )
             
             logger.info(f"Computed {len(rewards)} rewards, avg: {np.mean(rewards):.4f}")

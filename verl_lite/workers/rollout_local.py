@@ -33,7 +33,7 @@ from pathlib import Path
 import torch
 
 try:
-    from verl import DataProto
+    from verl_lite import TensorDict, tu
     from verl.workers.rollout.base import BaseRollout
     from verl.workers.config import RolloutConfig
 except ImportError as e:
@@ -341,9 +341,9 @@ class LocalRolloutClient(BaseRollout):
         """Get current model information from server."""
         return self.server.get_model_info()
         
-    async def generate_sequences_async(self, prompts: DataProto) -> DataProto:
+    async def generate_sequences_async(self, prompts: TensorDict) -> TensorDict:
         """Generate sequences asynchronously."""
-        # Convert DataProto to prompts
+        # Convert TensorDict to prompts
         prompt_texts = self._extract_prompts(prompts)
         
         # Create generation request
@@ -366,9 +366,9 @@ class LocalRolloutClient(BaseRollout):
                 
         return self._process_response(prompts, result)
     
-    def generate_sequences(self, prompts: DataProto) -> DataProto:
+    def generate_sequences(self, prompts: TensorDict) -> TensorDict:
         """Generate sequences synchronously."""
-        # Convert DataProto to prompts
+        # Convert TensorDict to prompts
         prompt_texts = self._extract_prompts(prompts)
         
         # Create generation request
@@ -392,36 +392,39 @@ class LocalRolloutClient(BaseRollout):
         result = response.json()
         return self._process_response(prompts, result)
     
-    def _extract_prompts(self, prompts: DataProto) -> List[str]:
-        """Extract prompt texts from DataProto."""
-        if "prompt_text" in prompts.non_tensor_batch:
-            return prompts.non_tensor_batch["prompt_text"].tolist()
-        elif "input_ids" in prompts.batch:
+    def _extract_prompts(self, prompts: TensorDict) -> List[str]:
+        """Extract prompt texts from TensorDict."""
+        if "prompt_text" in prompts:
+            prompt_text = tu.get_non_tensor_data(prompts, "prompt_text", [])
+            return prompt_text.tolist() if hasattr(prompt_text, 'tolist') else prompt_text
+        elif "input_ids" in prompts:
             # Decode from token IDs (need tokenizer)
             # This is a placeholder - in real usage you'd need the tokenizer
             return [f"prompt_{i}" for i in range(len(prompts))]
         else:
-            raise ValueError("No prompts found in DataProto")
+            raise ValueError("No prompts found in TensorDict")
     
-    def _process_response(self, original_prompts: DataProto, response: Dict) -> DataProto:
-        """Process server response back to DataProto."""
+    def _process_response(self, original_prompts: TensorDict, response: Dict) -> TensorDict:
+        """Process server response back to TensorDict."""
         # This is simplified - real implementation would properly handle
-        # tokenization and create proper response DataProto
+        # tokenization and create proper response TensorDict
         
         if "choices" in response:
             responses = [choice["text"] for choice in response["choices"]]
         else:
             responses = [""] * len(original_prompts)
             
-        # Create response DataProto (simplified)
+        # Create response TensorDict (simplified)
         import numpy as np
-        response_data = DataProto(
-            batch=original_prompts.batch.clone() if original_prompts.batch else None,
-            non_tensor_batch={
-                **original_prompts.non_tensor_batch,
-                "response_text": np.array(responses, dtype=object)
-            },
-            meta_info=original_prompts.meta_info
+        
+        # Get existing tensor and non-tensor data
+        tensor_dict = {k: v for k, v in original_prompts.items() if isinstance(v, torch.Tensor)}
+        non_tensor_dict = {k: tu.unwrap_non_tensor_data(v) for k, v in original_prompts.items() if not isinstance(v, torch.Tensor)}
+        non_tensor_dict["response_text"] = responses
+        
+        response_data = tu.get_tensordict(
+            tensor_dict=tensor_dict,
+            non_tensor_dict=non_tensor_dict
         )
         
         return response_data
@@ -437,7 +440,7 @@ class LocalRolloutClient(BaseRollout):
         except:
             return False
     
-    async def generate_sequences_async(self, prompts: DataProto) -> DataProto:
+    async def generate_sequences_async(self, prompts: TensorDict) -> TensorDict:
         """Generate sequences with proper context switching."""
         # Ensure we're in rollout mode before generation
         if not self.server.is_rollout_mode:
@@ -490,11 +493,11 @@ class LocalRolloutManager:
         """Stop the rollout server."""
         self.server.stop_server()
         
-    def generate_sequences(self, prompts: DataProto) -> DataProto:
+    def generate_sequences(self, prompts: TensorDict) -> TensorDict:
         """Generate sequences using the local server."""
         return self.client.generate_sequences(prompts)
         
-    async def generate_sequences_async(self, prompts: DataProto) -> DataProto:
+    async def generate_sequences_async(self, prompts: TensorDict) -> TensorDict:
         """Generate sequences asynchronously."""
         return await self.client.generate_sequences_async(prompts)
     

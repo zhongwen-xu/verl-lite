@@ -32,7 +32,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationConfig
 from tensordict import TensorDict
 
 # Import verl components we can reuse
-from verl import DataProto
+from verl_lite import TensorDict, tu
 
 # Try to import verl utilities with fallbacks
 try:
@@ -178,13 +178,13 @@ class LocalFSDPActorWorker:
         
         logger.info(f"Initialized optimizer with lr={optimizer_config.lr}")
     
-    def generate_sequences(self, prompts: DataProto) -> DataProto:
+    def generate_sequences(self, prompts: TensorDict) -> TensorDict:
         """Generate sequences using the actor model."""
         self.model.eval()
         
         with torch.no_grad():
-            input_ids = prompts.batch["input_ids"].to(self.device)
-            attention_mask = prompts.batch["attention_mask"].to(self.device)
+            input_ids = prompts["input_ids"].to(self.device)
+            attention_mask = prompts["attention_mask"].to(self.device)
             
             # Generation config
             gen_config = GenerationConfig(
@@ -221,28 +221,28 @@ class LocalFSDPActorWorker:
                 "sequences": sequences.cpu(),
             }, batch_size=(len(prompts),))
             
-            # Create response DataProto
-            response_data = DataProto(
-                batch=output_batch,
-                non_tensor_batch=prompts.non_tensor_batch.copy(),
-                meta_info=prompts.meta_info.copy()
+            # Create response TensorDict with non-tensor data
+            non_tensor_data = {k: tu.unwrap_non_tensor_data(v) for k, v in prompts.items() if not isinstance(v, torch.Tensor)}
+            response_data = tu.get_tensordict(
+                tensor_dict=output_batch.to_dict(),
+                non_tensor_dict=non_tensor_data
             )
         
         self.model.train()
         logger.info(f"Generated {len(response_data)} sequences")
         return response_data
     
-    def compute_log_probs(self, data: DataProto) -> DataProto:
+    def compute_log_probs(self, data: TensorDict) -> TensorDict:
         """Compute log probabilities for sequences."""
-        input_ids = data.batch["input_ids"].to(self.device)
-        attention_mask = data.batch["attention_mask"].to(self.device)
+        input_ids = data["input_ids"].to(self.device)
+        attention_mask = data["attention_mask"].to(self.device)
         
-        if "response_ids" in data.batch:
-            response_ids = data.batch["response_ids"].to(self.device)
+        if "response_ids" in data:
+            response_ids = data["response_ids"].to(self.device)
             full_ids = torch.cat([input_ids, response_ids], dim=-1)
             full_attention_mask = torch.cat([
                 attention_mask,
-                data.batch["response_mask"].to(self.device)
+                data["response_mask"].to(self.device)
             ], dim=-1)
         else:
             full_ids = input_ids
@@ -260,17 +260,19 @@ class LocalFSDPActorWorker:
         # Compute log probs
         log_probs = compute_log_probs(logits, full_ids, full_attention_mask)
         
-        # Add to output
-        output_batch = data.batch.clone()
-        output_batch["log_probs"] = log_probs.cpu()
+        # Create output TensorDict
+        output_tensors = {k: v.clone() if isinstance(v, torch.Tensor) else v for k, v in data.items() if isinstance(v, torch.Tensor)}
+        output_tensors["log_probs"] = log_probs.cpu()
         
-        return DataProto(
-            batch=output_batch,
-            non_tensor_batch=data.non_tensor_batch,
-            meta_info=data.meta_info
+        # Get non-tensor data
+        non_tensor_data = {k: tu.unwrap_non_tensor_data(v) for k, v in data.items() if not isinstance(v, torch.Tensor)}
+        
+        return tu.get_tensordict(
+            tensor_dict=output_tensors,
+            non_tensor_dict=non_tensor_data
         )
     
-    def update_policy(self, data: DataProto) -> Dict[str, Any]:
+    def update_policy(self, data: TensorDict) -> Dict[str, Any]:
         """Update policy with PPO mini-batch training."""
         self.model.train()
         
@@ -334,15 +336,15 @@ class LocalFSDPActorWorker:
         
         return final_metrics
     
-    def _train_micro_batch(self, micro_batch: DataProto, gradient_accumulation_steps: int) -> Dict[str, Any]:
+    def _train_micro_batch(self, micro_batch: TensorDict, gradient_accumulation_steps: int) -> Dict[str, Any]:
         """Train on a single micro-batch with gradient accumulation."""
         # Move to device
-        input_ids = micro_batch.batch["input_ids"].to(self.device)
-        attention_mask = micro_batch.batch["attention_mask"].to(self.device)
+        input_ids = micro_batch["input_ids"].to(self.device)
+        attention_mask = micro_batch["attention_mask"].to(self.device)
         
-        if "response_ids" in micro_batch.batch:
-            response_ids = micro_batch.batch["response_ids"].to(self.device)
-            response_mask = micro_batch.batch["response_mask"].to(self.device)
+        if "response_ids" in micro_batch:
+            response_ids = micro_batch["response_ids"].to(self.device)
+            response_mask = micro_batch["response_mask"].to(self.device)
             full_ids = torch.cat([input_ids, response_ids], dim=-1)
             full_attention_mask = torch.cat([attention_mask, response_mask], dim=-1)
         else:
@@ -350,8 +352,8 @@ class LocalFSDPActorWorker:
             full_attention_mask = attention_mask
         
         # Get training targets
-        advantages = micro_batch.batch.get("advantages", torch.zeros_like(full_ids[:, :-1]))
-        old_log_probs = micro_batch.batch.get("old_log_probs", torch.zeros_like(full_ids[:, :-1]))
+        advantages = micro_batch.get("advantages", torch.zeros_like(full_ids[:, :-1]))
+        old_log_probs = micro_batch.get("old_log_probs", torch.zeros_like(full_ids[:, :-1]))
         
         advantages = advantages.to(self.device)
         old_log_probs = old_log_probs.to(self.device)
@@ -401,7 +403,7 @@ class LocalFSDPActorWorker:
             "kl_divergence": (new_log_probs - old_log_probs).mean().item(),
         }
 
-    def train_step(self, data: DataProto) -> Dict[str, Any]:
+    def train_step(self, data: TensorDict) -> Dict[str, Any]:
         """Legacy method for compatibility. Use update_policy instead."""
         return self.update_policy(data)
     
@@ -491,10 +493,10 @@ class LocalFSDPCriticWorker:
             eps=optimizer_config.eps,
         )
     
-    def compute_values(self, data: DataProto) -> DataProto:
+    def compute_values(self, data: TensorDict) -> TensorDict:
         """Compute value function estimates."""
-        input_ids = data.batch["input_ids"].to(self.device)
-        attention_mask = data.batch["attention_mask"].to(self.device)
+        input_ids = data["input_ids"].to(self.device)
+        attention_mask = data["attention_mask"].to(self.device)
         
         with torch.no_grad():
             outputs = self.model(
@@ -510,22 +512,25 @@ class LocalFSDPCriticWorker:
             # Simple value computation (last token)
             values = hidden_states[attention_mask.bool()].mean(dim=1, keepdim=True)
             
-            output_batch = data.batch.clone()
-            output_batch["values"] = values.cpu()
+            # Create output TensorDict with values
+            output_tensors = {k: v.clone() if isinstance(v, torch.Tensor) else v for k, v in data.items() if isinstance(v, torch.Tensor)}
+            output_tensors["values"] = values.cpu()
+            
+            # Get non-tensor data
+            non_tensor_data = {k: tu.unwrap_non_tensor_data(v) for k, v in data.items() if not isinstance(v, torch.Tensor)}
         
-        return DataProto(
-            batch=output_batch,
-            non_tensor_batch=data.non_tensor_batch,
-            meta_info=data.meta_info
+        return tu.get_tensordict(
+            tensor_dict=output_tensors,
+            non_tensor_dict=non_tensor_data
         )
     
-    def train_step(self, data: DataProto) -> Dict[str, Any]:
+    def train_step(self, data: TensorDict) -> Dict[str, Any]:
         """Train the critic."""
         # Simplified critic training
         values = self.compute_values(data)
-        target_values = data.batch.get("target_values", torch.zeros_like(values.batch["values"]))
+        target_values = data.get("target_values", torch.zeros_like(values["values"]))
         
-        value_loss = nn.MSELoss()(values.batch["values"], target_values.to(self.device))
+        value_loss = nn.MSELoss()(values["values"], target_values.to(self.device))
         
         self.optimizer.zero_grad()
         value_loss.backward()
@@ -581,24 +586,24 @@ class LocalFSDPWorkers:
         else:
             raise AttributeError(f"Worker '{role}' does not have a 'model' attribute")
     
-    def generate_sequences(self, prompts: DataProto) -> DataProto:
+    def generate_sequences(self, prompts: TensorDict) -> TensorDict:
         """Generate sequences using the actor worker."""
         return self.workers['actor'].generate_sequences(prompts)
     
-    def compute_values(self, data: DataProto) -> Optional[DataProto]:
+    def compute_values(self, data: TensorDict) -> Optional[TensorDict]:
         """Compute critic values if critic is available."""
         if 'critic' in self.workers:
             return self.workers['critic'].compute_values(data)
         return None
     
-    def update_actor(self, data: DataProto) -> Dict[str, Any]:
+    def update_actor(self, data: TensorDict) -> Dict[str, Any]:
         """Update actor policy with PPO mini-batch training."""
         if 'actor' in self.workers:
             return self.workers['actor'].update_policy(data)
         else:
             raise ValueError("Actor worker not found")
     
-    def update_critic(self, data: DataProto) -> Dict[str, Any]:
+    def update_critic(self, data: TensorDict) -> Dict[str, Any]:
         """Update critic with data."""
         if 'critic' in self.workers:
             return self.workers['critic'].train_step(data)

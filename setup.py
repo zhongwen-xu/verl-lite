@@ -24,10 +24,10 @@ with open("README.md", "r", encoding="utf-8") as fh:
 # Core dependencies that mirror verl but without Ray
 install_requires = [
     # Core verl dependency - this is the key requirement!
-    "verl==0.5.0",  # Must have full verl installed to import from it
+    "verl>=0.5.0",  # Must have full verl installed to import from it
     
-    # Required for DataProto batch operations
-    "tensordict>=0.3.0",
+    # Required for TensorDict operations (aligned with verl's upgrade)
+    "tensordict>=0.10.0",
     
     # HTTP client for server-mode rollout
     "aiohttp>=3.8.0",

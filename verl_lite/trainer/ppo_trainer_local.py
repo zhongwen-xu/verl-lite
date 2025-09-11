@@ -26,7 +26,7 @@ from dataclasses import dataclass
 
 # Import core components from verl
 try:
-    from verl import DataProto
+    from verl_lite import TensorDict, tu
     from verl.trainer.ppo import core_algos
     from verl.trainer.ppo.core_algos import AdvantageEstimator, agg_loss
     from verl.trainer.ppo.reward import compute_reward
@@ -233,7 +233,7 @@ class LocalPPOTrainer:
             logger.error(f"Weight sync validation error: {e}")
             return False
     
-    def rollout(self, prompts: DataProto) -> DataProto:
+    def rollout(self, prompts: TensorDict) -> TensorDict:
         """
         Perform rollout to generate responses.
         
@@ -251,7 +251,7 @@ class LocalPPOTrainer:
         logger.info(f"Rollout completed, generated {len(responses)} responses")
         return responses
     
-    def compute_values(self, data: DataProto) -> Optional[DataProto]:
+    def compute_values(self, data: TensorDict) -> Optional[TensorDict]:
         """Compute critic values if critic is available."""
         if need_critic(self.config.algo):
             values = self.workers.compute_values(data)
@@ -259,7 +259,7 @@ class LocalPPOTrainer:
             return values
         return None
     
-    def compute_rewards(self, data: DataProto) -> DataProto:
+    def compute_rewards(self, data: TensorDict) -> TensorDict:
         """Compute rewards for the generated responses."""
         if need_reward_model(self.config.algo):
             # Use reward model worker
@@ -271,7 +271,7 @@ class LocalPPOTrainer:
         logger.info("Computed rewards")
         return rewards
     
-    def compute_advantages(self, values: DataProto, rewards: DataProto) -> DataProto:
+    def compute_advantages(self, values: TensorDict, rewards: TensorDict) -> TensorDict:
         """Compute advantages using GAE."""
         if self.advantage_estimator:
             advantages = self.advantage_estimator.estimate(values, rewards)
@@ -283,7 +283,7 @@ class LocalPPOTrainer:
             logger.info("Using simple advantages (reward)")
             return advantages
     
-    def ppo_step(self, data: DataProto) -> Dict[str, Any]:
+    def ppo_step(self, data: TensorDict) -> Dict[str, Any]:
         """
         Perform a PPO training step.
         
@@ -356,16 +356,10 @@ class LocalPPOTrainer:
             else:
                 advantages = rewards
             
-            # 5. Prepare training data
-            train_data = DataProto(
-                batch=responses.batch,
-                non_tensor_batch={
-                    **responses.non_tensor_batch,
-                    "rewards": rewards.non_tensor_batch.get("rewards"),
-                    "advantages": advantages.non_tensor_batch.get("advantages") if hasattr(advantages, 'non_tensor_batch') else None,
-                },
-                meta_info=responses.meta_info
-            )
+            # 5. Prepare training data - merge TensorDicts
+            train_data = tu.union_tensor_dict(responses, rewards)
+            if advantages is not None:
+                train_data = tu.union_tensor_dict(train_data, advantages)
             
             # 6. PPO training step
             step_metrics = self.ppo_step(train_data)

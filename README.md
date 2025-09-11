@@ -21,7 +21,7 @@ Code written for verl-lite works in full VERL with minimal changes.
 ### Installation
 
 ```bash
-# Basic installation (requires verl==0.5.0)
+# Basic installation (requires verl>=0.5.0)
 pip install -e .
 
 # With vLLM support
@@ -40,7 +40,7 @@ pip install -e .[all]
 import verl_lite
 
 # Import verl components directly (same API)
-from verl import DataProto
+from verl_lite import TensorDict, tu
 from verl.trainer.config import AlgoConfig
 
 # Use verl-lite local components
@@ -77,7 +77,7 @@ verl-lite maintains the same APIs but removes Ray:
 
 ```
 ┌─ verl Components (Direct Import)
-│  ├─ DataProto           # Same data protocol
+│  ├─ TensorDict          # Native PyTorch data structure
 │  ├─ AlgoConfig          # Same algorithm config
 │  └─ reward_score        # Same reward utilities
 │
