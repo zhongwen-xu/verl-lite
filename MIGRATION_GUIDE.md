@@ -321,7 +321,7 @@ Test your migration with these steps:
 ## 📚 Best Practices
 
 1. **Development Workflow**
-   - Start with verl-lite for development (requires verl==0.5.0)
+   - Start with verl-lite for development (requires verl>=0.5.0)
    - Use identical hyperparameters
    - Test locally before scaling
    - Migrate incrementally

@@ -92,7 +92,8 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "verl-lite-grpo=verl_lite.recipe.grpo.train_grpo:main",
+            # Point to the packaged top-level recipe module
+            "verl-lite-grpo=recipe.grpo.train_grpo:main",
         ],
     },
 )

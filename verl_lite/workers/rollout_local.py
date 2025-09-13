@@ -91,6 +91,7 @@ class LocalRolloutServer:
         # State management following verl pattern
         self.is_rollout_mode = False
         self.weights_loaded = False
+        self.model_version = 0  # increment on each successful weight update
         
     def start_server(self):
         """Start the rollout server."""
@@ -154,10 +155,11 @@ class LocalRolloutServer:
                 return True
             
             # Use engine-specific update method
-            success = await self._update_weights_impl((name, tensor) for name, tensor in weight_list, **kwargs)
+            success = await self._update_weights_impl(((name, tensor) for name, tensor in weight_list), **kwargs)
             
             if success:
                 self.weights_loaded = True
+                self.model_version += 1
                 logger.info("Weight update completed successfully")
             else:
                 logger.error("Weight update failed")
@@ -178,7 +180,8 @@ class LocalRolloutServer:
             'engine_type': self.engine_type,
             'is_rollout_mode': self.is_rollout_mode,
             'weights_loaded': self.weights_loaded,
-            'server_url': self.base_url
+            'server_url': self.base_url,
+            'model_version': self.model_version,
         }
 
 
@@ -590,3 +593,63 @@ class VerlStyleWeightSync:
         if self.is_in_rollout_mode:
             await self.rollout_manager.trainer_mode()
             self.is_in_rollout_mode = False
+
+
+class WeightSyncManager:
+    """
+    Thin wrapper around VerlStyleWeightSync providing a sync API expected by the trainer.
+
+    - set_sync_frequency(n): store how often to sync
+    - sync_weights_from_trainer(model, step): conditional sync based on frequency
+    - force_sync(model, step): unconditional sync
+    - exit_rollout_mode(): switch engine back to trainer mode
+    """
+
+    def __init__(self, rollout_manager: LocalRolloutManager):
+        self._sync = VerlStyleWeightSync(rollout_manager)
+        self._frequency = 1
+        self._last_synced_step = -1
+
+    def set_sync_frequency(self, n: int) -> None:
+        try:
+            n = int(n)
+            self._frequency = max(1, n)
+        except Exception:
+            self._frequency = 1
+
+    def _run_async(self, coro) -> bool:
+        """Run an async coroutine from sync context and return success bool."""
+        try:
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop and loop.is_running():
+                # In a running loop (e.g., notebooks), run in a task and block
+                return loop.run_until_complete(coro)  # type: ignore[arg-type]
+            else:
+                return asyncio.run(coro)
+        except Exception:
+            return False
+
+    def sync_weights_from_trainer(self, fsdp_model, step: int) -> bool:
+        """Conditionally sync based on configured frequency."""
+        if step % self._frequency != 0:
+            return True
+        ok = self._run_async(self._sync.sync_weights_from_fsdp_model(fsdp_model))
+        if ok:
+            self._last_synced_step = step
+        return ok
+
+    def force_sync(self, fsdp_model, step: int) -> bool:
+        ok = self._run_async(self._sync.sync_weights_from_fsdp_model(fsdp_model))
+        if ok:
+            self._last_synced_step = step
+        return ok
+
+    def exit_rollout_mode(self) -> None:
+        try:
+            self._run_async(self._sync.exit_rollout_mode())
+        except Exception:
+            pass

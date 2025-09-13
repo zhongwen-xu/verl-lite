@@ -440,9 +440,7 @@ class LocalPPOTrainer:
             if self.rollout_manager:
                 # Exit rollout mode before stopping
                 if self.weight_sync_manager:
-                    import asyncio
-                    loop = asyncio.get_event_loop()
-                    loop.run_until_complete(self.weight_sync_manager.exit_rollout_mode())
+                    self.weight_sync_manager.exit_rollout_mode()
                 self.rollout_manager.stop()
             self.workers.cleanup()
     

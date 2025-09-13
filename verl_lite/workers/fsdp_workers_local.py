@@ -610,7 +610,7 @@ class LocalFSDPWorkers:
         else:
             raise ValueError("Critic worker not found")
     
-    def train_step(self, data: DataProto, role: str = 'actor') -> Dict[str, Any]:
+    def train_step(self, data: TensorDict, role: str = 'actor') -> Dict[str, Any]:
         """Legacy method for training step on specified worker."""
         if role == 'actor':
             return self.update_actor(data)
